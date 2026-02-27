@@ -79,8 +79,8 @@ cd test\EndpointTester && dotnet run
 |-----------------------|--------------------|------------------------------------|
 | `LEYLINE_EWDK_ROOT`   | `D:\eWDK_28000`   | Root of the eWDK installation      |
 | `LEYLINE_SDK_VERSION` | `10.0.28000.0`    | WDK / SDK version string           |
-| `LEYLINE_VM_NAME`     | `LeylineTestVM`   | Hyper-V VM name                    |
-| `LEYLINE_VM_SNAPSHOT` | `LeylineSnapshot` | Snapshot to revert before testing  |
+| `LEYLINE_VM_NAME`     | `TestVM`   | Hyper-V VM name                    |
+| `LEYLINE_VM_SNAPSHOT` | `Leyline` | Snapshot to revert before testing  |
 | `LEYLINE_VM_USER`     | `USER`            | VM administrator username          |
 | `LEYLINE_VM_PASS`     | *(required)*      | VM administrator password          |
 | `LEYLINE_CERT_PASS`   | *(required)*      | Code-signing certificate password  |

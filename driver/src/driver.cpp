@@ -1,12 +1,9 @@
 // Copyright (c) 2026 Randall Rosas (Slategray). All rights reserved.
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// DRIVER ENTRY POINT
-// Wires PortCls into the driver object, then hooks key dispatch routines.
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+#define INITGUID
 #include "leyline_miniport.h"
 
+PDEVICE_OBJECT g_FunctionalDeviceObject = nullptr;
 extern PDEVICE_OBJECT g_ControlDeviceObject;
 extern ULONGLONG      g_EtwRegHandle;
 extern "C" NTSTATUS NTAPI AddDevice(PDRIVER_OBJECT, PDEVICE_OBJECT);
@@ -18,6 +15,28 @@ extern "C" NTSTATUS NTAPI AddDevice(PDRIVER_OBJECT, PDEVICE_OBJECT);
 static void NTAPI DriverUnload(PDRIVER_OBJECT /*DriverObject*/)
 {
     DbgPrint("Leyline: DriverUnload\n");
+
+    if (g_FunctionalDeviceObject)
+    {
+        DeviceExtension *ext = GetDeviceExtension(g_FunctionalDeviceObject);
+        if (ext)
+        {
+            if (ext->LoopbackMdl)
+            {
+                if (ext->LoopbackBuffer) MmUnmapLockedPages(ext->LoopbackBuffer, ext->LoopbackMdl);
+                MmFreePagesFromMdl(ext->LoopbackMdl);
+                IoFreeMdl(ext->LoopbackMdl);
+                ext->LoopbackMdl = nullptr;
+            }
+            if (ext->SharedParamsMdl)
+            {
+                if (ext->SharedParams) MmUnmapLockedPages(ext->SharedParams, ext->SharedParamsMdl);
+                MmFreePagesFromMdl(ext->SharedParamsMdl);
+                IoFreeMdl(ext->SharedParamsMdl);
+                ext->SharedParamsMdl = nullptr;
+            }
+        }
+    }
 
     if (g_ControlDeviceObject)
     {
@@ -42,9 +61,8 @@ static void NTAPI DriverUnload(PDRIVER_OBJECT /*DriverObject*/)
 
 extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
-    DbgPrint("Leyline: DriverEntry v0.1.0 (REBUILT)\n");
+    DbgPrint("Leyline: DriverEntry v0.1.0\n");
 
-    // Register ETW provider for structured tracing.
     EtwRegister(&ETW_PROVIDER_GUID, nullptr, nullptr, &g_EtwRegHandle);
 
     DriverObject->DriverUnload = DriverUnload;
@@ -55,7 +73,6 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
         DbgPrint("Leyline: PcInitializeAdapterDriver FAILED 0x%X\n", status);
         return status;
     }
-    DbgPrint("Leyline: PcInitializeAdapterDriver SUCCESS\n");
 
     return status;
 }

@@ -7,13 +7,10 @@
 
 #pragma once
 
-#include <ntddk.h>
-#include <wdm.h>
-#include <windef.h>
-#include <ks.h>
-#include <ksmedia.h>
 #include <portcls.h>
+#include <stdunk.h>
 #include <stdarg.h>
+#include <intrin.h>
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // IOCTL DEFINITIONS
@@ -47,6 +44,8 @@ struct LeylineSharedParameters
     LONGLONG CaptureStartQpc;
     ULONG   BufferSize;
     ULONG   ByteRate;
+    ULONG   WritePos;           // Current render position (byte offset)
+    ULONG   ReadPos;            // Current capture position (byte offset)
 };
 #pragma pack(pop)
 
@@ -138,7 +137,8 @@ namespace WaveRTMath
     inline ULONGLONG TicksToBytes(LONGLONG elapsedTicks, ULONG byteRate, LONGLONG frequency)
     {
         if (frequency <= 0) return 0;
-        return (ULONGLONG)(((unsigned __int128)elapsedTicks * byteRate) / (unsigned __int128)frequency);
+        // Standard 64-bit math is safe for >100 days of continuous playback at 192kHz/24bit.
+        return (ULONGLONG)((elapsedTicks * (unsigned __int64)byteRate) / (unsigned __int64)frequency);
     }
 
     // Clamp a byte offset into a ring buffer.

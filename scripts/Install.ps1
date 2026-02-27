@@ -6,8 +6,8 @@ param (
     [switch]$clean,        # Full clean build on HOST
     [switch]$fast,         # Skip reverting VM
     [switch]$Uninstall,    # Only perform uninstallation on VM
-    [string]$VMName = ($env:LEYLINE_VM_NAME -or "LeylineTestVM"),
-    [string]$SnapshotName = ($env:LEYLINE_VM_SNAPSHOT -or "LeylineSnapshot"),
+    [string]$VMName = $(if ($env:LEYLINE_VM_NAME) { $env:LEYLINE_VM_NAME } else { "TestVM" }),
+    [string]$SnapshotName = $(if ($env:LEYLINE_VM_SNAPSHOT) { $env:LEYLINE_VM_SNAPSHOT } else { "Leyline" }),
     [PSCredential]$Credential
 )
 
@@ -18,8 +18,8 @@ $BuildVersion = "0.2.0"
 
 # --- Credentials ---
 if (-not $PSBoundParameters.ContainsKey('Credential')) {
-    $VMUser = ($env:LEYLINE_VM_USER -or "USER")
-    $VMPassword = ($env:LEYLINE_VM_PASS -or "REDACTED_VM_PASS")
+    $VMUser = if ($env:LEYLINE_VM_USER) { $env:LEYLINE_VM_USER } else { "User" }
+    $VMPassword = if ($env:LEYLINE_VM_PASS) { $env:LEYLINE_VM_PASS } else { "rd" }
     $secPassword = ConvertTo-SecureString $VMPassword -AsPlainText -Force
     $Credential = New-Object System.Management.Automation.PSCredential ($VMUser, $secPassword)
 }
@@ -27,7 +27,7 @@ if (-not $PSBoundParameters.ContainsKey('Credential')) {
 # --- 0. CERTIFICATE GENERATION ---
 $pfxPath = "$ProjectRoot\leyline.pfx"
 $cerPath = "$ProjectRoot\leyline.cer"
-$CertPassword = ($env:LEYLINE_CERT_PASS -or "REDACTED_CERT_PASS")
+$CertPassword = if ($env:LEYLINE_CERT_PASS) { $env:LEYLINE_CERT_PASS } else { "REDACTED_CERT_PASS" }
 
 if (-not (Test-Path $pfxPath)) {
     Write-Host "[*] Generating Self-Signed Certificate..."
@@ -72,14 +72,14 @@ if (-not $Uninstall) {
         foreach ($t in $targets) { if (Test-Path $t) { Remove-Item $t -Recurse -Force } }
     }
 
-    # Build with NMAKE inside the eWDK environment.
+    # Build with MSBuild inside the eWDK environment.
     Push-Location "$ProjectRoot\driver"
-    if ($env:NMAKE_EXE -and (Test-Path $env:NMAKE_EXE)) {
-        & $env:NMAKE_EXE /f makefile.def BUILD_ALT_DIR=fre BUILD_DEFAULT_TARGETS=1
+
+    if ($env:MSBUILD_EXE) {
+        & $env:MSBUILD_EXE leyline.vcxproj /p:Configuration=Release /p:Platform=x64 /t:ClCompile,Link,StampInf
     }
     else {
-        # Fallback: invoke build.exe (legacy eWDK).
-        build -cz
+        throw "MSBuild not found in environment."
     }
     if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Kernel build failed." }
     Pop-Location
@@ -87,13 +87,19 @@ if (-not $Uninstall) {
     # Stage package artifacts.
     if (-not (Test-Path "$ProjectRoot\package")) { New-Item -ItemType Directory -Path "$ProjectRoot\package" | Out-Null }
 
-    # Copy built SYS and generated INF (Inf2Cat will produce the CAT).
-    $buildOutput = "$ProjectRoot\driver\objfre_win10_amd64\amd64"
+    # Copy built SYS and generated INF.
+    $buildOutput = "$ProjectRoot\driver\bin\Release"
+
     if (Test-Path "$buildOutput\leyline.sys") {
         Copy-Item "$buildOutput\leyline.sys" "$ProjectRoot\package\leyline.sys" -Force
     }
-    Copy-Item "$ProjectRoot\driver\leyline.inx" "$ProjectRoot\package\leyline.inf" -Force
-
+    $stampedInf = "$ProjectRoot\driver\obj\Release\leyline.inf"
+    if (Test-Path $stampedInf) {
+        Copy-Item $stampedInf "$ProjectRoot\package\leyline.inf" -Force
+    }
+    else {
+        Copy-Item "$ProjectRoot\driver\leyline.inx" "$ProjectRoot\package\leyline.inf" -Force
+    }
     # Run Inf2Cat to produce the catalog.
     if ($env:INF2CAT_EXE -and (Test-Path $env:INF2CAT_EXE)) {
         & $env:INF2CAT_EXE /driver:"$ProjectRoot\package" /os:10_X64 | Out-Null
@@ -153,16 +159,28 @@ try {
         Write-Host "    (VM) Upgrading Driver Stack..."
         pnputil /add-driver "leyline.inf" /install | Out-Null
 
-        $devcon = "C:\eWDK_28000\Program Files\Windows Kits\10\Tools\$sdkVersion\x64\devcon.exe"
-        if (Test-Path $devcon) {
-            & $devcon update "leyline.inf" "ROOT\MEDIA\LeylineAudio" | Out-Null
+        # Try to find devcon in common locations or current path.
+        $devcon = "devcon.exe"
+        if (-not (Get-Command $devcon -ErrorAction SilentlyContinue)) {
+            $devcon = Join-Path $path "devcon.exe"
+        }
+        if (-not (Test-Path $devcon)) {
+            $devcon = "C:\eWDK_28000\Program Files\Windows Kits\10\Tools\$sdkVersion\x64\devcon.exe"
+        }
+
+        if ((Test-Path $devcon) -or (Get-Command "devcon.exe" -ErrorAction SilentlyContinue)) {
+            Write-Host "    (VM) Updating device via devcon ($devcon)..."
+            & $devcon update "leyline.inf" "ROOT\MEDIA\LeylineAudio"
+            Write-Host "    (VM) devcon update exit code: $LASTEXITCODE"
+            & $devcon rescan
         }
         else {
             Write-Host "    (VM) [WARNING] devcon.exe not found. Falling back to devgen..." -ForegroundColor Yellow
-            devgen /add /bus ROOT /hardwareid "ROOT\MEDIA\LeylineAudio" | Out-Null
+            pnputil /add-driver "leyline.inf" /install
+            devgen /add /bus ROOT /hardwareid "ROOT\MEDIA\LeylineAudio"
         }
 
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 5
         $device = Get-PnpDevice | Where-Object { $_.HardwareId -match "ROOT\\MEDIA\\LeylineAudio" } | Select-Object -First 1
         if ($device) {
             Write-Host "    (VM) UPGRADE SUCCESSFUL: $($device.InstanceId)" -ForegroundColor Green
@@ -172,15 +190,21 @@ try {
         }
         else {
             Write-Host "    (VM) No existing device found. Performing fresh install..."
-            if (Test-Path $devcon) {
-                & $devcon install "leyline.inf" "ROOT\MEDIA\LeylineAudio" | Out-Null
+            if ((Test-Path $devcon) -or (Get-Command "devcon.exe" -ErrorAction SilentlyContinue)) {
+                & $devcon install "leyline.inf" "ROOT\MEDIA\LeylineAudio"
+                Write-Host "    (VM) devcon install exit code: $LASTEXITCODE"
             }
             else {
-                devgen /add /bus ROOT /hardwareid "ROOT\MEDIA\LeylineAudio" | Out-Null
+                devgen /add /bus ROOT /hardwareid "ROOT\MEDIA\LeylineAudio"
             }
         }
 
-        Write-Host "    (VM) Searching for Endpoints..."
+        # Restart audio services to force endpoint enumeration.
+        Restart-Service "AudioEndpointBuilder" -Force -ErrorAction SilentlyContinue
+        Restart-Service "Audiosrv"             -Force -ErrorAction SilentlyContinue
+
+        Write-Host "    (VM) Searching for Endpoints (waiting 10s)..."
+        Start-Sleep -Seconds 10
         $foundCount = 0
         $endpoints = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render" -ErrorAction SilentlyContinue
         foreach ($e in $endpoints) {
@@ -194,9 +218,15 @@ try {
             }
         }
         Write-Host "    (VM) Total Leyline Audio Endpoints: $foundCount"
+
+        if ($foundCount -eq 0) {
+            Write-Warning "    (VM) No audio endpoints found yet. You may need to manually enable the device in Sound Settings or wait a moment."
+        }
     } -ArgumentList $remotePath, $sdkVersion
 }
 catch {
+    # If the error was just about devcon returning 1 (which it often does even on success), ignore it if endpoints found.
+    # But since we fixed the logic, we just report the error.
     Write-Error "VM Operation failed: $_"
 }
 finally {

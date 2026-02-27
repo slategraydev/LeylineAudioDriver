@@ -46,12 +46,19 @@ else {
 
 # Resolve tool paths.
 $kitsRoot = if ($env:eWDK_ROOT_DIR) { "$env:eWDK_ROOT_DIR\Program Files\Windows Kits\10" } else { "C:\Program Files (x86)\Windows Kits\10" }
+$vsRoot = if ($env:eWDK_ROOT_DIR) { "$env:eWDK_ROOT_DIR\Program Files\Microsoft Visual Studio" } else { "" }
+
 $st = Get-ChildItem -Path "$kitsRoot\bin" -Filter signtool.exe  -Recurse | Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
 $ic = Get-ChildItem -Path "$kitsRoot\bin" -Filter Inf2Cat.exe   -Recurse | Select-Object -First 1
-$nl = Get-ChildItem -Path "$kitsRoot\bin" -Filter nmake.exe     -Recurse | Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
+
+# MSBuild is in VS folder.
+$mb = $null
+if ($vsRoot -and (Test-Path $vsRoot)) {
+    $mb = Get-ChildItem -Path "$vsRoot" -Filter MSBuild.exe -Recurse | Where-Object { $_.FullName -match "Bin\\amd64\\MSBuild.exe" } | Select-Object -First 1
+}
 
 if ($st) { $env:SIGNTOOL_EXE = $st.FullName }
 if ($ic) { $env:INF2CAT_EXE = $ic.FullName }
-if ($nl) { $env:NMAKE_EXE = $nl.FullName }
+if ($mb) { $env:MSBUILD_EXE = $mb.FullName }
 
-Write-Host "[SUCCESS] Environment Set. SignTool=$env:SIGNTOOL_EXE  NMAKE=$env:NMAKE_EXE" -ForegroundColor Green
+Write-Host "[SUCCESS] Environment Set. SignTool=$env:SIGNTOOL_EXE  MSBuild=$env:MSBUILD_EXE" -ForegroundColor Green

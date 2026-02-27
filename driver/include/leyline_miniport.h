@@ -36,7 +36,7 @@ struct DeviceExtension
 
 // The PortCls reference driver reserves this many pointer-sized slots
 // in the DeviceExtension before our own fields begin.
-static const SIZE_T PORT_CLASS_DEVICE_EXTENSION_SIZE = 64 * sizeof(PVOID);
+static const SIZE_T LEYLINE_PORT_CLASS_DEVICE_EXTENSION_SIZE = 64 * sizeof(PVOID);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // WAVE RT STREAM
@@ -49,19 +49,18 @@ class CMiniportWaveRTStream : public IMiniportWaveRTStream,
 public:
     DECLARE_STD_UNKNOWN();
 
-    CMiniportWaveRTStream(DeviceExtension* DevExt);
+    CMiniportWaveRTStream(PUNKNOWN OuterUnknown, DeviceExtension* DevExt);
     virtual ~CMiniportWaveRTStream();
 
     // IMiniportWaveRTStream
     STDMETHODIMP SetFormat(PKSDATAFORMAT DataFormat) override;
     STDMETHODIMP SetState(KSSTATE State) override;
-    STDMETHODIMP GetPosition(ULONGLONG* Position) override;
+    STDMETHODIMP GetPosition(PKSAUDIO_POSITION Position) override;
     STDMETHODIMP AllocateAudioBuffer(ULONG RequestedSize, PMDL* AudioBufferMdl,
                                      ULONG* ActualSize, ULONG* OffsetFromFirstPage,
                                      MEMORY_CACHING_TYPE* CacheType) override;
-    STDMETHODIMP FreeAudioBuffer(PMDL AudioBufferMdl, ULONG BufferSize) override;
-    STDMETHODIMP GetHWLatency(ULONGLONG* FifoSize, ULONGLONG* ChipsetDelay,
-                              ULONGLONG* CodecDelay) override;
+    STDMETHODIMP_(void) FreeAudioBuffer(PMDL AudioBufferMdl, ULONG BufferSize) override;
+    STDMETHODIMP_(void) GetHWLatency(KSRTAUDIO_HWLATENCY* Latency) override;
     STDMETHODIMP GetPositionRegister(KSRTAUDIO_HWREGISTER* Register) override;
     STDMETHODIMP GetClockRegister(KSRTAUDIO_HWREGISTER* Register) override;
 
@@ -91,7 +90,7 @@ class CMiniportWaveRT : public IMiniportWaveRT,
 public:
     DECLARE_STD_UNKNOWN();
 
-    CMiniportWaveRT(BOOLEAN IsCapture, DeviceExtension* DevExt);
+    CMiniportWaveRT(PUNKNOWN OuterUnknown, BOOLEAN IsCapture, DeviceExtension* DevExt);
     virtual ~CMiniportWaveRT();
 
     // IMiniport
@@ -105,10 +104,10 @@ public:
     STDMETHODIMP Init(PUNKNOWN UnknownAdapter, PRESOURCELIST ResourceList,
                       IPortWaveRT* Port) override;
     STDMETHODIMP GetDeviceDescription(PDEVICE_DESCRIPTION DeviceDescription) override;
-    STDMETHODIMP NewStream(PMINIPORTWAVERTAINSTREAM* Stream,
-                           PUNKNOWN OuterUnknown, POOL_TYPE PoolType,
+    STDMETHODIMP NewStream(PMINIPORTWAVERTSTREAM* Stream,
+                           PPORTWAVERTSTREAM PortStream,
                            ULONG PinId, BOOLEAN Capture,
-                           PKSDATAFORMAT DataFormat, PDRMRIGHTS DrmRights) override;
+                           PKSDATAFORMAT DataFormat) override;
 
 private:
     BOOLEAN          m_IsCapture;
@@ -126,7 +125,7 @@ class CMiniportTopology : public IMiniportTopology,
 public:
     DECLARE_STD_UNKNOWN();
 
-    CMiniportTopology(BOOLEAN IsCapture);
+    CMiniportTopology(PUNKNOWN OuterUnknown, BOOLEAN IsCapture);
     virtual ~CMiniportTopology();
 
     // IMiniport
@@ -153,5 +152,5 @@ private:
 inline DeviceExtension* GetDeviceExtension(PDEVICE_OBJECT DeviceObject)
 {
     PUCHAR base = reinterpret_cast<PUCHAR>(DeviceObject->DeviceExtension);
-    return reinterpret_cast<DeviceExtension*>(base + PORT_CLASS_DEVICE_EXTENSION_SIZE);
+    return reinterpret_cast<DeviceExtension*>(base + LEYLINE_PORT_CLASS_DEVICE_EXTENSION_SIZE);
 }

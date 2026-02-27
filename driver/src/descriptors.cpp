@@ -11,11 +11,10 @@
 // DATA RANGES
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const KSDATARANGE_AUDIO_EX g_PcmDataRange =
+const KSDATARANGE_AUDIO_CUSTOM g_PcmDataRange =
 {
-    // KSDATARANGE base
     {
-        sizeof(KSDATARANGE_AUDIO_EX), 0, 0, 0,
+        sizeof(KSDATARANGE_AUDIO_CUSTOM), 0, 0, 0,
         STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
         STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
         STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
@@ -27,10 +26,10 @@ const KSDATARANGE_AUDIO_EX g_PcmDataRange =
     192000  // MaximumSampleFrequency
 };
 
-const KSDATARANGE_AUDIO_EX g_FloatDataRange =
+const KSDATARANGE_AUDIO_CUSTOM g_FloatDataRange =
 {
     {
-        sizeof(KSDATARANGE_AUDIO_EX), 0, 0, 0,
+        sizeof(KSDATARANGE_AUDIO_CUSTOM), 0, 0, 0,
         STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
         STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
         STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
@@ -46,7 +45,7 @@ const KSDATARANGE g_BridgeDataRange =
     STATICGUIDOF(KSDATAFORMAT_SPECIFIER_NONE)
 };
 
-const KSDATARANGE * const g_WaveDataRanges[2]   = { &g_PcmDataRange, &g_FloatDataRange };
+const KSDATARANGE * const g_WaveDataRanges[2]   = { (PKSDATARANGE)&g_PcmDataRange, (PKSDATARANGE)&g_FloatDataRange };
 const KSDATARANGE * const g_BridgeDataRanges[1] = { &g_BridgeDataRange };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -64,7 +63,7 @@ static const KSIDENTIFIER g_KsInterfaces[] =
 
 static NTSTATUS HandleBasicSupportFull(PPCPROPERTY_REQUEST Req, ULONG AccessFlags, ULONG TypeId)
 {
-    const ULONG fullSize = sizeof(KSPROPERTY_DESCRIPTION_EX);
+    const ULONG fullSize = sizeof(KSPROPERTY_DESCRIPTION);
     const ULONG ulongSize = sizeof(ULONG);
 
     if (Req->ValueSize == 0)
@@ -74,12 +73,12 @@ static NTSTATUS HandleBasicSupportFull(PPCPROPERTY_REQUEST Req, ULONG AccessFlag
     }
     if (Req->ValueSize >= fullSize)
     {
-        auto *desc = reinterpret_cast<KSPROPERTY_DESCRIPTION_EX*>(Req->Value);
+        auto *desc = reinterpret_cast<KSPROPERTY_DESCRIPTION*>(Req->Value);
         if (desc)
         {
             desc->AccessFlags      = AccessFlags;
             desc->DescriptionSize  = fullSize;
-            desc->PropTypeSet.Set  = KSPROPTYPESETID_GENERAL_PROP;
+            desc->PropTypeSet.Set  = KSPROPTYPESETID_General;
             desc->PropTypeSet.Id   = TypeId;
             desc->PropTypeSet.Flags = 0;
             desc->MembersListCount = 0;
@@ -105,8 +104,6 @@ static NTSTATUS HandleBasicSupportFull(PPCPROPERTY_REQUEST Req, ULONG AccessFlag
 NTSTATUS ComponentIdHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest) return STATUS_INVALID_PARAMETER;
-
-    DbgPrint("LeylineKernel: KSPROPERTY_GENERAL_COMPONENTID\n");
 
     if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
         return HandleBasicSupportFull(PropertyRequest,
@@ -147,9 +144,7 @@ NTSTATUS JackDescriptionHandler(PPCPROPERTY_REQUEST PropertyRequest)
         return HandleBasicSupportFull(PropertyRequest,
                KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, VT_I4);
 
-    DbgPrint("Leyline: JackDescriptionHandler ID=%u Pin=%u\n", propId, pinId);
-
-    if (propId == KSPROPERTY_JACK_DESCRIPTION_ID)
+    if (propId == KSPROPERTY_JACK_DESCRIPTION)
     {
         if (PropertyRequest->ValueSize == 0)
         {
@@ -164,15 +159,15 @@ NTSTATUS JackDescriptionHandler(PPCPROPERTY_REQUEST PropertyRequest)
         {
             j->ChannelMapping  = 0x3;   // KSAUDIO_SPEAKER_STEREO
             j->Color           = 0;
-            j->ConnectionType  = 1;     // eConnType3Point5mm
-            j->GeoLocation     = 1;     // eGeoLocRear
-            j->GenLocation     = 0;
-            j->PortConnection  = 0;
+            j->ConnectionType  = (EPcxConnectionType)1;     // eConnType3Point5mm
+            j->GeoLocation     = (EPcxGeoLocation)1;        // eGeoLocRear
+            j->GenLocation     = (EPcxGenLocation)0;
+            j->PortConnection  = (EPxcPortConnection)0;
             j->IsConnected     = TRUE;
         }
         return STATUS_SUCCESS;
     }
-    else if (propId == KSPROPERTY_JACK_DESCRIPTION2_ID)
+    else if (propId == KSPROPERTY_JACK_DESCRIPTION2)
     {
         if (PropertyRequest->ValueSize == 0)
         {
@@ -195,9 +190,9 @@ NTSTATUS VolumeHandler(PPCPROPERTY_REQUEST PropertyRequest)
 
     struct VOL_BASIC
     {
-        KSPROPERTY_DESCRIPTION_EX  desc;
-        KSPROPERTY_MEMBERSHEADER_EX hdr;
-        KSPROPERTY_STEPPING_LONG_EX stepping;
+        KSPROPERTY_DESCRIPTION  desc;
+        KSPROPERTY_MEMBERSHEADER hdr;
+        KSPROPERTY_STEPPING_LONG stepping;
     };
 
     if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
@@ -217,17 +212,17 @@ NTSTATUS VolumeHandler(PPCPROPERTY_REQUEST PropertyRequest)
             {
                 v->desc.AccessFlags      = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT;
                 v->desc.DescriptionSize  = fullSize;
-                v->desc.PropTypeSet.Set  = KSPROPTYPESETID_GENERAL_PROP;
+                v->desc.PropTypeSet.Set  = KSPROPTYPESETID_General;
                 v->desc.PropTypeSet.Id   = VT_I4;
                 v->desc.PropTypeSet.Flags = 0;
                 v->desc.MembersListCount = 1;
                 v->desc.Reserved         = 0;
                 v->hdr.MembersFlags  = KSPROPERTY_MEMBER_STEPPEDRANGES;
-                v->hdr.MembersSize   = sizeof(KSPROPERTY_STEPPING_LONG_EX);
+                v->hdr.MembersSize   = sizeof(KSPROPERTY_STEPPING_LONG);
                 v->hdr.MembersCount  = 1;
                 v->hdr.Flags         = 0;
-                v->stepping.SignedMinimum  = -96 * 0x10000;
-                v->stepping.SignedMaximum  = 0;
+                v->stepping.Bounds.SignedMinimum  = -96 * 0x10000;
+                v->stepping.Bounds.SignedMaximum  = 0;
                 v->stepping.SteppingDelta  = 0x10000;
                 v->stepping.Reserved       = 0;
             }
@@ -283,22 +278,52 @@ NTSTATUS MuteHandler(PPCPROPERTY_REQUEST PropertyRequest)
 NTSTATUS PinCategoryHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest || !PropertyRequest->PropertyItem) return STATUS_INVALID_PARAMETER;
-    DbgPrint("Leyline: PinCategoryHandler ID=%u\n", PropertyRequest->PropertyItem->Id);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
+        return HandleBasicSupportFull(PropertyRequest, KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, VT_CLSID);
+
+    if (PropertyRequest->ValueSize == 0)
+    {
+        PropertyRequest->ValueSize = sizeof(GUID);
+        return STATUS_BUFFER_OVERFLOW;
+    }
+    if (PropertyRequest->ValueSize < sizeof(GUID))
+        return STATUS_BUFFER_TOO_SMALL;
+
+    GUID *category = reinterpret_cast<GUID*>(PropertyRequest->Value);
+    if (!category) return STATUS_INVALID_PARAMETER;
+
+    *category = KSCATEGORY_AUDIO;
+    PropertyRequest->ValueSize = sizeof(GUID);
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS PinNameHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest || !PropertyRequest->PropertyItem) return STATUS_INVALID_PARAMETER;
-    DbgPrint("Leyline: PinNameHandler ID=%u\n", PropertyRequest->PropertyItem->Id);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
+        return HandleBasicSupportFull(PropertyRequest, KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, VT_CLSID);
+
+    if (PropertyRequest->ValueSize == 0)
+    {
+        PropertyRequest->ValueSize = sizeof(GUID);
+        return STATUS_BUFFER_OVERFLOW;
+    }
+    if (PropertyRequest->ValueSize < sizeof(GUID))
+        return STATUS_BUFFER_TOO_SMALL;
+
+    GUID *name = reinterpret_cast<GUID*>(PropertyRequest->Value);
+    if (!name) return STATUS_INVALID_PARAMETER;
+
+    *name = GUID_NULL;
+    PropertyRequest->ValueSize = sizeof(GUID);
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS ProposedFormatHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest || !PropertyRequest->PropertyItem) return STATUS_INVALID_PARAMETER;
-
-    DbgPrint("Leyline: ProposedFormatHandler\n");
 
     ULONG rwFlags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT;
 
@@ -310,18 +335,17 @@ NTSTATUS ProposedFormatHandler(PPCPROPERTY_REQUEST PropertyRequest)
 
     if (PropertyRequest->Verb & KSPROPERTY_TYPE_GET)
     {
-        // Return a fixed 48 kHz 16-bit stereo extensible format.
-        struct KSDATAFORMAT_WAVEFORMATEXTENSIBLE_EX
+        struct KSDATAFORMAT_WAVEFORMATEXTENSIBLE_LOCAL
         {
             KSDATAFORMAT        DataFormat;
             WAVEFORMATEXTENSIBLE WaveFormatExt;
         };
 
-        ULONG fmtSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE_EX);
+        ULONG fmtSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE_LOCAL);
         if (PropertyRequest->ValueSize == 0) { PropertyRequest->ValueSize = fmtSize; return STATUS_BUFFER_OVERFLOW; }
         if (PropertyRequest->ValueSize < fmtSize) return STATUS_BUFFER_TOO_SMALL;
 
-        auto *r = reinterpret_cast<KSDATAFORMAT_WAVEFORMATEXTENSIBLE_EX*>(PropertyRequest->Value);
+        auto *r = reinterpret_cast<KSDATAFORMAT_WAVEFORMATEXTENSIBLE_LOCAL*>(PropertyRequest->Value);
         if (r)
         {
             r->DataFormat.FormatSize  = fmtSize;
@@ -330,7 +354,7 @@ NTSTATUS ProposedFormatHandler(PPCPROPERTY_REQUEST PropertyRequest)
             r->DataFormat.Reserved    = 0;
             r->DataFormat.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
             r->DataFormat.SubFormat   = KSDATAFORMAT_SUBTYPE_PCM;
-            r->DataFormat.Specifier   = KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
+            r->DataFormat.Specifier   = KSDATAFORMAT_SPECIFIER_WAVEFORMATEXTENSIBLE;
 
             r->WaveFormatExt.Format.wFormatTag      = WAVE_FORMAT_EXTENSIBLE;
             r->WaveFormatExt.Format.nChannels        = 2;
@@ -344,7 +368,6 @@ NTSTATUS ProposedFormatHandler(PPCPROPERTY_REQUEST PropertyRequest)
             r->WaveFormatExt.SubFormat               = KSDATAFORMAT_SUBTYPE_PCM;
         }
         PropertyRequest->ValueSize = fmtSize;
-        DbgPrint("Leyline: ProposedFormatHandler GET -> 48kHz Stereo PCM\n");
         return STATUS_SUCCESS;
     }
     return STATUS_SUCCESS;
@@ -353,7 +376,6 @@ NTSTATUS ProposedFormatHandler(PPCPROPERTY_REQUEST PropertyRequest)
 NTSTATUS AudioEffectsDiscoveryHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest || !PropertyRequest->PropertyItem) return STATUS_INVALID_PARAMETER;
-    DbgPrint("Leyline: AudioEffectsDiscoveryHandler ID=%u\n", PropertyRequest->PropertyItem->Id);
 
     if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
     {
@@ -370,7 +392,6 @@ NTSTATUS AudioModuleHandler(PPCPROPERTY_REQUEST PropertyRequest)
 {
     if (!PropertyRequest || !PropertyRequest->PropertyItem) return STATUS_INVALID_PARAMETER;
     ULONG propId = PropertyRequest->PropertyItem->Id;
-    DbgPrint("Leyline: AudioModuleHandler ID=%u\n", propId);
 
     if (PropertyRequest->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
     {
@@ -378,7 +399,7 @@ NTSTATUS AudioModuleHandler(PPCPROPERTY_REQUEST PropertyRequest)
         auto *f = reinterpret_cast<ULONG*>(PropertyRequest->Value);
         if (f)
         {
-            *f = (propId == KSPROPERTY_AUDIOMODULE_COMMAND_ID)
+            *f = (propId == KSPROPERTY_AUDIOMODULE_COMMAND)
                  ? KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT
                  : KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
         }
@@ -394,63 +415,63 @@ NTSTATUS AudioModuleHandler(PPCPROPERTY_REQUEST PropertyRequest)
 
 static const PCPROPERTY_ITEM g_GeneralProperties[] =
 {
-    { &KSPROPSETID_General_,   KSPROPERTY_GENERAL_COMPONENTID_ID,
+    { &KSPROPSETID_General,   KSPROPERTY_GENERAL_COMPONENTID,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, ComponentIdHandler }
 };
 
 static const PCPROPERTY_ITEM g_WaveFilterProperties[] =
 {
-    { &KSPROPSETID_General_, KSPROPERTY_GENERAL_COMPONENTID_ID,
+    { &KSPROPSETID_General, KSPROPERTY_GENERAL_COMPONENTID,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, ComponentIdHandler },
-    { &KSPROPSETID_Pin_,     KSPROPERTY_PIN_PROPOSEDATAFORMAT,
+    { &KSPROPSETID_Pin,     KSPROPERTY_PIN_PROPOSEDATAFORMAT,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, ProposedFormatHandler },
-    { &KSPROPSETID_Pin_,     KSPROPERTY_PIN_PROPOSEDATAFORMAT2,
+    { &KSPROPSETID_Pin,     KSPROPERTY_PIN_PROPOSEDATAFORMAT2,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, ProposedFormatHandler },
-    { &KSPROPSETID_Jack_,    KSPROPERTY_JACK_DESCRIPTION_ID,
+    { &KSPROPSETID_Jack,    KSPROPERTY_JACK_DESCRIPTION,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
-    { &KSPROPSETID_Jack_,    KSPROPERTY_JACK_DESCRIPTION2_ID,
+    { &KSPROPSETID_Jack,    KSPROPERTY_JACK_DESCRIPTION2,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
-    { &KSPROPSETID_AudioEffectsDiscovery_, KSPROPERTY_AUDIOEFFECTSDISCOVERY_EFFECTSLIST_ID,
+    { &KSPROPSETID_AudioEffectsDiscovery, 1 /* KSPROPERTY_AUDIOEFFECTSDISCOVERY_EFFECTSLIST */,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, AudioEffectsDiscoveryHandler },
-    { &KSPROPSETID_AudioModule_, KSPROPERTY_AUDIOMODULE_DESCRIPTORS_ID,
+    { &KSPROPSETID_AudioModule, KSPROPERTY_AUDIOMODULE_DESCRIPTORS,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, AudioModuleHandler },
-    { &KSPROPSETID_AudioModule_, KSPROPERTY_AUDIOMODULE_COMMAND_ID,
+    { &KSPROPSETID_AudioModule, KSPROPERTY_AUDIOMODULE_COMMAND,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, AudioModuleHandler },
-    { &KSPROPSETID_AudioModule_, KSPROPERTY_AUDIOMODULE_NOTIFICATION_DEVICE_ID_ID,
+    { &KSPROPSETID_AudioModule, KSPROPERTY_AUDIOMODULE_NOTIFICATION_DEVICE_ID,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, AudioModuleHandler },
 };
 
 static const PCPROPERTY_ITEM g_TopoFilterProperties[] =
 {
-    { &KSPROPSETID_General_, KSPROPERTY_GENERAL_COMPONENTID_ID,
+    { &KSPROPSETID_General, KSPROPERTY_GENERAL_COMPONENTID,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, ComponentIdHandler },
-    { &KSPROPSETID_Jack_,    KSPROPERTY_JACK_DESCRIPTION_ID,
+    { &KSPROPSETID_Jack,    KSPROPERTY_JACK_DESCRIPTION,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
-    { &KSPROPSETID_Jack_,    KSPROPERTY_JACK_DESCRIPTION2_ID,
+    { &KSPROPSETID_Jack,    KSPROPERTY_JACK_DESCRIPTION2,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
 };
 
 static const PCPROPERTY_ITEM g_PinProperties[] =
 {
-    { &KSPROPSETID_Pin_,  KSPROPERTY_PIN_CATEGORY,
+    { &KSPROPSETID_Pin,  KSPROPERTY_PIN_CATEGORY,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PinCategoryHandler },
-    { &KSPROPSETID_Pin_,  KSPROPERTY_PIN_NAME,
+    { &KSPROPSETID_Pin,  KSPROPERTY_PIN_NAME,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PinNameHandler },
-    { &KSPROPSETID_Jack_, KSPROPERTY_JACK_DESCRIPTION_ID,
+    { &KSPROPSETID_Jack, KSPROPERTY_JACK_DESCRIPTION,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
-    { &KSPROPSETID_Jack_, KSPROPERTY_JACK_DESCRIPTION2_ID,
+    { &KSPROPSETID_Jack, KSPROPERTY_JACK_DESCRIPTION2,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, JackDescriptionHandler },
 };
 
 static const PCPROPERTY_ITEM g_VolumeProperties[] =
 {
-    { &KSPROPSETID_Audio_, KSPROPERTY_AUDIO_VOLUMELEVEL_ID,
+    { &KSPROPSETID_Audio, KSPROPERTY_AUDIO_VOLUMELEVEL,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, VolumeHandler }
 };
 
 static const PCPROPERTY_ITEM g_MuteProperties[] =
 {
-    { &KSPROPSETID_Audio_, KSPROPERTY_AUDIO_MUTE_ID,
+    { &KSPROPSETID_Audio, KSPROPERTY_AUDIO_MUTE,
       KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, MuteHandler }
 };
 
@@ -461,25 +482,14 @@ DEFINE_PCAUTOMATION_TABLE_PROP(g_PinAutomationTable,         g_PinProperties);
 DEFINE_PCAUTOMATION_TABLE_PROP(g_VolumeAutomationTable,      g_VolumeProperties);
 DEFINE_PCAUTOMATION_TABLE_PROP(g_MuteAutomationTable,        g_MuteProperties);
 
-static const PCAUTOMATION_TABLE g_MinimalAutomationTable = { 0 };
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// NODES
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 static const PCNODE_DESCRIPTOR g_TopoNodes[] =
 {
-    { 0, &g_VolumeAutomationTable, &KSNODETYPE_VOLUME,     &KSAUDFNAME_MASTER_VOLUME_ },
-    { 0, &g_MuteAutomationTable,   &KSNODETYPE_MUTE,       &KSAUDFNAME_MASTER_MUTE_  },
+    { 0, &g_VolumeAutomationTable, &KSNODETYPE_VOLUME,     &KSAUDFNAME_MASTER_VOLUME },
+    { 0, &g_MuteAutomationTable,   &KSNODETYPE_MUTE,       &KSAUDFNAME_MASTER_MUTE   },
 };
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// PIN DESCRIPTORS
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static const PCPIN_DESCRIPTOR g_WaveRenderPins[] =
 {
-    // Pin 0: Wave Sink (from client app)
     {
         4, 4, 1,
         &g_PinAutomationTable,
@@ -491,7 +501,6 @@ static const PCPIN_DESCRIPTOR g_WaveRenderPins[] =
             &KSCATEGORY_AUDIO, nullptr, 0
         }
     },
-    // Pin 1: Wave Bridge (to topology)
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -507,7 +516,6 @@ static const PCPIN_DESCRIPTOR g_WaveRenderPins[] =
 
 static const PCPIN_DESCRIPTOR g_WaveCapturePins[] =
 {
-    // Pin 0: Wave Sink (to client app, data flows out)
     {
         4, 4, 1,
         &g_PinAutomationTable,
@@ -519,7 +527,6 @@ static const PCPIN_DESCRIPTOR g_WaveCapturePins[] =
             &KSCATEGORY_AUDIO, nullptr, 0
         }
     },
-    // Pin 1: Wave Bridge (from topology)
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -535,7 +542,6 @@ static const PCPIN_DESCRIPTOR g_WaveCapturePins[] =
 
 static const PCPIN_DESCRIPTOR g_TopoRenderPins[] =
 {
-    // Pin 0: Bridge input from wave
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -546,7 +552,6 @@ static const PCPIN_DESCRIPTOR g_TopoRenderPins[] =
             &KSCATEGORY_AUDIO, nullptr, 0
         }
     },
-    // Pin 1: Speaker output
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -561,7 +566,6 @@ static const PCPIN_DESCRIPTOR g_TopoRenderPins[] =
 
 static const PCPIN_DESCRIPTOR g_TopoCapturePins[] =
 {
-    // Pin 0: Microphone input
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -572,7 +576,6 @@ static const PCPIN_DESCRIPTOR g_TopoCapturePins[] =
             &KSNODETYPE_MICROPHONE, nullptr, 0
         }
     },
-    // Pin 1: Bridge output to wave
     {
         1, 1, 1,
         &g_PinAutomationTable,
@@ -585,45 +588,31 @@ static const PCPIN_DESCRIPTOR g_TopoCapturePins[] =
     },
 };
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// CONNECTIONS
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 static const PCCONNECTION_DESCRIPTOR g_WaveConnections[] =
 {
-    // Sink (0) -> Bridge (1)
     { PCFILTER_NODE, KSPIN_WAVE_SINK, PCFILTER_NODE, KSPIN_WAVE_BRIDGE }
 };
 
 static const PCCONNECTION_DESCRIPTOR g_WaveCaptureConnections[] =
 {
-    // Bridge (1) -> Sink (0)
     { PCFILTER_NODE, KSPIN_WAVE_BRIDGE, PCFILTER_NODE, KSPIN_WAVE_SINK }
 };
 
 static const PCCONNECTION_DESCRIPTOR g_TopoConnections[] =
 {
-    { PCFILTER_NODE, KSPIN_TOPO_BRIDGE, 0,              1 },  // Bridge -> Volume in
-    { 0,             0,                 1,              1 },  // Volume out -> Mute in
-    { 1,             0,                 PCFILTER_NODE,  KSPIN_TOPO_LINEOUT } // Mute out -> LineOut
+    { PCFILTER_NODE, KSPIN_TOPO_BRIDGE,  0,             0 },
+    { 0,             1,                  1,             0 },
+    { 1,             1,                  PCFILTER_NODE, KSPIN_TOPO_LINEOUT }
 };
 
 static const PCCONNECTION_DESCRIPTOR g_TopoCaptureConnections[] =
 {
-    { PCFILTER_NODE, 0, PCFILTER_NODE, 1 }  // Mic -> Bridge
+    { PCFILTER_NODE, 0, PCFILTER_NODE, 1 }
 };
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// CATEGORIES
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static const GUID g_TopoFilterCategories[]      = { STATICGUIDOF(KSCATEGORY_AUDIO), STATICGUIDOF(KSCATEGORY_TOPOLOGY) };
 static const GUID g_WaveRenderCategories[]       = { STATICGUIDOF(KSCATEGORY_AUDIO), STATICGUIDOF(KSCATEGORY_RENDER), STATICGUIDOF(KSCATEGORY_REALTIME) };
 static const GUID g_WaveCaptureCategories[]      = { STATICGUIDOF(KSCATEGORY_AUDIO), STATICGUIDOF(KSCATEGORY_CAPTURE), STATICGUIDOF(KSCATEGORY_REALTIME) };
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// FILTER DESCRIPTORS
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 const PCFILTER_DESCRIPTOR g_WaveRenderFilterDescriptor =
 {
@@ -656,7 +645,7 @@ const PCFILTER_DESCRIPTOR g_TopoCaptureFilterDescriptor =
 {
     0, &g_TopoFilterAutomationTable,
     sizeof(PCPIN_DESCRIPTOR), SIZEOF_ARRAY(g_TopoCapturePins), g_TopoCapturePins,
-    0, 0, nullptr,
+    sizeof(PCNODE_DESCRIPTOR), SIZEOF_ARRAY(g_TopoNodes), g_TopoNodes,
     SIZEOF_ARRAY(g_TopoCaptureConnections), g_TopoCaptureConnections,
     SIZEOF_ARRAY(g_TopoFilterCategories), g_TopoFilterCategories
 };

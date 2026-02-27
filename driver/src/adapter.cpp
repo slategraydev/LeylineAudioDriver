@@ -11,12 +11,10 @@
 // GLOBALS
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Control Device Object for IOCTL communication with user-mode (HSA/APO).
 PDEVICE_OBJECT g_ControlDeviceObject    = nullptr;
-PDEVICE_OBJECT g_FunctionalDeviceObject = nullptr;
+extern PDEVICE_OBJECT g_FunctionalDeviceObject;
 ULONGLONG      g_EtwRegHandle           = 0;
 
-// Original dispatch routines that PortCls wired in; we chain to them for non-CDO IRPs.
 static PDRIVER_DISPATCH s_OriginalDispatchCreate  = nullptr;
 static PDRIVER_DISPATCH s_OriginalDispatchClose   = nullptr;
 static PDRIVER_DISPATCH s_OriginalDispatchControl = nullptr;
@@ -33,7 +31,6 @@ static NTSTATUS DispatchCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             return s_OriginalDispatchCreate(DeviceObject, Irp);
         return STATUS_DEVICE_NOT_READY;
     }
-    DbgPrint("Leyline: CDO Create\n");
     Irp->IoStatus.Status      = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -48,7 +45,6 @@ static NTSTATUS DispatchClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             return s_OriginalDispatchClose(DeviceObject, Irp);
         return STATUS_DEVICE_NOT_READY;
     }
-    DbgPrint("Leyline: CDO Close\n");
     Irp->IoStatus.Status      = STATUS_SUCCESS;
     Irp->IoStatus.Information = 0;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -69,48 +65,36 @@ static NTSTATUS DispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     NTSTATUS           status   = STATUS_SUCCESS;
     ULONG_PTR          info     = 0;
 
-    DbgPrint("Leyline: CDO IOCTL 0x%08X\n", ioctl);
-
     switch (ioctl)
     {
     case IOCTL_LEYLINE_GET_STATUS:
-    {
-        ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-        if (outLen >= sizeof(ULONG))
+        if (stack->Parameters.DeviceIoControl.OutputBufferLength >= sizeof(ULONG))
         {
             *reinterpret_cast<ULONG*>(Irp->AssociatedIrp.SystemBuffer) = 0x1337BEEF;
             info = sizeof(ULONG);
         }
-        else
-            status = STATUS_BUFFER_TOO_SMALL;
+        else status = STATUS_BUFFER_TOO_SMALL;
         break;
-    }
+
     case IOCTL_LEYLINE_MAP_BUFFER:
-    {
-        ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-        if (outLen >= sizeof(PVOID) && g_FunctionalDeviceObject)
+        if (g_FunctionalDeviceObject)
         {
             DeviceExtension *ext = GetDeviceExtension(g_FunctionalDeviceObject);
-            *reinterpret_cast<PVOID*>(Irp->AssociatedIrp.SystemBuffer) = ext->UserMapping;
-            info = sizeof(PVOID);
+            if (ext->LoopbackMdl)
+            {
+                PVOID userAddr = MmMapLockedPagesSpecifyCache(ext->LoopbackMdl, UserMode, MmCached, nullptr, FALSE, NormalPagePriority);
+                if (userAddr)
+                {
+                    *reinterpret_cast<PVOID*>(Irp->AssociatedIrp.SystemBuffer) = userAddr;
+                    info = sizeof(PVOID);
+                }
+                else status = STATUS_INSUFFICIENT_RESOURCES;
+            }
+            else status = STATUS_DEVICE_NOT_READY;
         }
-        else
-            status = g_FunctionalDeviceObject ? STATUS_BUFFER_TOO_SMALL : STATUS_DEVICE_NOT_READY;
+        else status = STATUS_DEVICE_NOT_READY;
         break;
-    }
-    case IOCTL_LEYLINE_MAP_PARAMS:
-    {
-        ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-        if (outLen >= sizeof(PVOID) && g_FunctionalDeviceObject)
-        {
-            DeviceExtension *ext = GetDeviceExtension(g_FunctionalDeviceObject);
-            *reinterpret_cast<PVOID*>(Irp->AssociatedIrp.SystemBuffer) = ext->SharedParamsUserMapping;
-            info = sizeof(PVOID);
-        }
-        else
-            status = g_FunctionalDeviceObject ? STATUS_BUFFER_TOO_SMALL : STATUS_DEVICE_NOT_READY;
-        break;
-    }
+
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;
@@ -131,148 +115,188 @@ extern "C" NTSTATUS NTAPI StartDevice(PDEVICE_OBJECT DeviceObject, PIRP Irp, PRE
     NTSTATUS status;
     DeviceExtension *devExt = GetDeviceExtension(DeviceObject);
 
-    DbgPrint("Leyline: StartDevice (FDO: %p)\n", DeviceObject);
+    if (!devExt->LoopbackMdl)
+    {
+        devExt->LoopbackSize = 128 * 1024;
+        PHYSICAL_ADDRESS low = {0}, high = {0}, skip = {0};
+        high.LowPart = 0xFFFFFFFF;
+        devExt->LoopbackMdl = MmAllocatePagesForMdlEx(low, high, skip, devExt->LoopbackSize, MmCached, MM_ALLOCATE_FULLY_REQUIRED);
+        if (devExt->LoopbackMdl)
+        {
+            devExt->LoopbackBuffer = (PUCHAR)MmMapLockedPagesSpecifyCache(devExt->LoopbackMdl, KernelMode, MmCached, nullptr, FALSE, NormalPagePriority);
+            if (devExt->LoopbackBuffer) RtlZeroMemory(devExt->LoopbackBuffer, devExt->LoopbackSize);
+        }
+    }
+
+    if (!devExt->SharedParamsMdl)
+    {
+        PHYSICAL_ADDRESS low = {0}, high = {0}, skip = {0};
+        high.LowPart = 0xFFFFFFFF;
+        devExt->SharedParamsMdl = MmAllocatePagesForMdlEx(low, high, skip, sizeof(LeylineSharedParameters), MmCached, MM_ALLOCATE_FULLY_REQUIRED);
+        if (devExt->SharedParamsMdl)
+        {
+            devExt->SharedParams = (LeylineSharedParameters*)MmMapLockedPagesSpecifyCache(devExt->SharedParamsMdl, KernelMode, MmCached, nullptr, FALSE, NormalPagePriority);
+            if (devExt->SharedParams)
+            {
+                RtlZeroMemory(devExt->SharedParams, sizeof(LeylineSharedParameters));
+                devExt->SharedParams->BufferSize = (ULONG)devExt->LoopbackSize;
+                devExt->SharedParams->ByteRate   = 48000 * 4;
+                LARGE_INTEGER freq;
+                KeQueryPerformanceCounter(&freq);
+                devExt->SharedParams->QpcFrequency = freq.QuadPart;
+            }
+        }
+    }
+
+    PPORT renderPort = nullptr;
+    PPORT capturePort = nullptr;
+    PPORT renderTopoPort = nullptr;
+    PPORT captureTopoPort = nullptr;
 
     // ---- WaveRender ----
-    DbgPrint("Leyline: Registering WaveRender Port\n");
-
-    PUNKNOWN renderPort = nullptr;
     status = PcNewPort(&renderPort, CLSID_PortWaveRT);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcNewPort(WaveRT Render) FAILED 0x%X\n", status); return status; }
-
-    CMiniportWaveRT *renderMiniport = new (NonPagedPool, 'LLWR') CMiniportWaveRT(FALSE, devExt);
-    if (!renderMiniport) { renderPort->Release(); return STATUS_INSUFFICIENT_RESOURCES; }
-    devExt->RenderMiniport = renderMiniport;
-
-    PUNKNOWN renderMiniportUnk = nullptr;
-    renderMiniport->QueryInterface(IID_IUnknown, reinterpret_cast<PVOID*>(&renderMiniportUnk));
-
-    status = static_cast<IPortWaveRT*>(renderPort)->Init(nullptr, ResourceList, nullptr);
-    // Note: PortCls's IPort::Init signature in some WDKs is:
-    //   Init(DeviceObject, Irp, Miniport, UnknownAdapter, ResourceList)
-    // We call through the IPortWaveRT vtable which the SDK handles.
-
-    UNICODE_STRING renderName;
-    RtlInitUnicodeString(&renderName, L"WaveRender");
-    status = PcRegisterSubdevice(DeviceObject, &renderName, renderMiniportUnk);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcRegisterSubdevice(WaveRender) FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: WaveRender Subdevice Registered\n");
+    if (NT_SUCCESS(status))
+    {
+        CMiniportWaveRT *renderMiniport = new (NonPagedPool, 'LLWR') CMiniportWaveRT(nullptr, FALSE, devExt);
+        if (renderMiniport)
+        {
+            renderMiniport->AddRef();
+            devExt->RenderMiniport = renderMiniport;
+            status = renderPort->Init(DeviceObject, Irp, renderMiniport, nullptr, ResourceList);
+            if (NT_SUCCESS(status))
+            {
+                status = PcRegisterSubdevice(DeviceObject, L"WaveRender", renderPort);
+            }
+            renderMiniport->Release();
+        }
+        else status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
     // ---- WaveCapture ----
-    DbgPrint("Leyline: Registering WaveCapture Port\n");
-
-    PUNKNOWN capturePort = nullptr;
     status = PcNewPort(&capturePort, CLSID_PortWaveRT);
-    if (!NT_SUCCESS(status)) return status;
-
-    CMiniportWaveRT *captureMiniport = new (NonPagedPool, 'LLWC') CMiniportWaveRT(TRUE, devExt);
-    if (!captureMiniport) { capturePort->Release(); return STATUS_INSUFFICIENT_RESOURCES; }
-    devExt->CaptureMiniport = captureMiniport;
-
-    PUNKNOWN captureMiniportUnk = nullptr;
-    captureMiniport->QueryInterface(IID_IUnknown, reinterpret_cast<PVOID*>(&captureMiniportUnk));
-
-    UNICODE_STRING captureName;
-    RtlInitUnicodeString(&captureName, L"WaveCapture");
-    status = PcRegisterSubdevice(DeviceObject, &captureName, captureMiniportUnk);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcRegisterSubdevice(WaveCapture) FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: WaveCapture Subdevice Registered\n");
+    if (NT_SUCCESS(status))
+    {
+        CMiniportWaveRT *captureMiniport = new (NonPagedPool, 'LLWC') CMiniportWaveRT(nullptr, TRUE, devExt);
+        if (captureMiniport)
+        {
+            captureMiniport->AddRef();
+            devExt->CaptureMiniport = captureMiniport;
+            status = capturePort->Init(DeviceObject, Irp, captureMiniport, nullptr, ResourceList);
+            if (NT_SUCCESS(status))
+            {
+                status = PcRegisterSubdevice(DeviceObject, L"WaveCapture", capturePort);
+            }
+            captureMiniport->Release();
+        }
+        else status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
     // ---- TopologyRender ----
-    DbgPrint("Leyline: Registering TopologyRender Port\n");
-
-    PUNKNOWN renderTopoPort = nullptr;
     status = PcNewPort(&renderTopoPort, CLSID_PortTopology);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcNewPort(TopologyRender) FAILED 0x%X\n", status); return status; }
-
-    CMiniportTopology *renderTopoMiniport = new (NonPagedPool, 'LLTR') CMiniportTopology(FALSE);
-    if (!renderTopoMiniport) { renderTopoPort->Release(); return STATUS_INSUFFICIENT_RESOURCES; }
-    devExt->RenderTopoMiniport = renderTopoMiniport;
-
-    PUNKNOWN renderTopoMiniportUnk = nullptr;
-    renderTopoMiniport->QueryInterface(IID_IUnknown, reinterpret_cast<PVOID*>(&renderTopoMiniportUnk));
-
-    UNICODE_STRING topoRenderName;
-    RtlInitUnicodeString(&topoRenderName, L"TopologyRender");
-    status = PcRegisterSubdevice(DeviceObject, &topoRenderName, renderTopoMiniportUnk);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcRegisterSubdevice(TopologyRender) FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: TopologyRender Subdevice Registered\n");
-
-    // Physical connection: WaveRender (pin 1) -> TopologyRender (pin 0)
-    status = PcRegisterPhysicalConnection(DeviceObject, renderMiniportUnk, 1, renderTopoMiniportUnk, 0);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: Physical Connection Wave->Topo FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: Physical Connection Wave->Topo SUCCESS\n");
+    if (NT_SUCCESS(status))
+    {
+        CMiniportTopology *renderTopoMiniport = new (NonPagedPool, 'LLTR') CMiniportTopology(nullptr, FALSE);
+        if (renderTopoMiniport)
+        {
+            renderTopoMiniport->AddRef();
+            devExt->RenderTopoMiniport = renderTopoMiniport;
+            status = renderTopoPort->Init(DeviceObject, Irp, renderTopoMiniport, nullptr, ResourceList);
+            if (NT_SUCCESS(status))
+            {
+                status = PcRegisterSubdevice(DeviceObject, L"TopologyRender", renderTopoPort);
+            }
+            renderTopoMiniport->Release();
+        }
+        else status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
     // ---- TopologyCapture ----
-    DbgPrint("Leyline: Registering TopologyCapture Port\n");
-
-    PUNKNOWN captureTopoPort = nullptr;
     status = PcNewPort(&captureTopoPort, CLSID_PortTopology);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcNewPort(TopologyCapture) FAILED 0x%X\n", status); return status; }
+    if (NT_SUCCESS(status))
+    {
+        CMiniportTopology *captureTopoMiniport = new (NonPagedPool, 'LLTC') CMiniportTopology(nullptr, TRUE);
+        if (captureTopoMiniport)
+        {
+            captureTopoMiniport->AddRef();
+            devExt->CaptureTopoMiniport = captureTopoMiniport;
+            status = captureTopoPort->Init(DeviceObject, Irp, captureTopoMiniport, nullptr, ResourceList);
+            if (NT_SUCCESS(status))
+            {
+                status = PcRegisterSubdevice(DeviceObject, L"TopologyCapture", captureTopoPort);
+            }
+            captureTopoMiniport->Release();
+        }
+        else status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (!NT_SUCCESS(status)) goto Cleanup;
 
-    CMiniportTopology *captureTopoMiniport = new (NonPagedPool, 'LLTC') CMiniportTopology(TRUE);
-    if (!captureTopoMiniport) { captureTopoPort->Release(); return STATUS_INSUFFICIENT_RESOURCES; }
-    devExt->CaptureTopoMiniport = captureTopoMiniport;
+    // Physical connections
+    PUNKNOWN renderPortUnk = nullptr;
+    status = renderPort->QueryInterface(IID_IUnknown, (PVOID*)&renderPortUnk);
+    if (NT_SUCCESS(status))
+    {
+        PUNKNOWN renderTopoPortUnk = nullptr;
+        status = renderTopoPort->QueryInterface(IID_IUnknown, (PVOID*)&renderTopoPortUnk);
+        if (NT_SUCCESS(status))
+        {
+            PcRegisterPhysicalConnection(DeviceObject, renderPortUnk, 1, renderTopoPortUnk, 0);
+            renderTopoPortUnk->Release();
+        }
+        renderPortUnk->Release();
+    }
 
-    PUNKNOWN captureTopoMiniportUnk = nullptr;
-    captureTopoMiniport->QueryInterface(IID_IUnknown, reinterpret_cast<PVOID*>(&captureTopoMiniportUnk));
+    PUNKNOWN capturePortUnk = nullptr;
+    status = capturePort->QueryInterface(IID_IUnknown, (PVOID*)&capturePortUnk);
+    if (NT_SUCCESS(status))
+    {
+        PUNKNOWN captureTopoPortUnk = nullptr;
+        status = captureTopoPort->QueryInterface(IID_IUnknown, (PVOID*)&captureTopoPortUnk);
+        if (NT_SUCCESS(status))
+        {
+            PcRegisterPhysicalConnection(DeviceObject, captureTopoPortUnk, 1, capturePortUnk, 1);
+            captureTopoPortUnk->Release();
+        }
+        capturePortUnk->Release();
+    }
 
-    UNICODE_STRING topoCaptureName;
-    RtlInitUnicodeString(&topoCaptureName, L"TopologyCapture");
-    status = PcRegisterSubdevice(DeviceObject, &topoCaptureName, captureTopoMiniportUnk);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: PcRegisterSubdevice(TopologyCapture) FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: TopologyCapture Subdevice Registered\n");
-
-    // Physical connection: TopologyCapture (pin 1) -> WaveCapture (pin 1)
-    status = PcRegisterPhysicalConnection(DeviceObject, captureTopoMiniportUnk, 1, captureMiniportUnk, 1);
-    if (!NT_SUCCESS(status)) { DbgPrint("Leyline: Physical Connection Topo->Wave(Capture) FAILED 0x%X\n", status); return status; }
-    DbgPrint("Leyline: Physical Connection Topo->Wave(Capture) SUCCESS\n");
-
-    // ---- CDO Creation ----
+    // CDO Creation
     g_FunctionalDeviceObject = DeviceObject;
     if (!g_ControlDeviceObject)
     {
         UNICODE_STRING deviceName;
         RtlInitUnicodeString(&deviceName, L"\\Device\\LeylineAudio");
-
-        status = IoCreateDevice(DeviceObject->DriverObject, sizeof(PVOID),
-                                &deviceName, FILE_DEVICE_UNKNOWN, 0, FALSE, &g_ControlDeviceObject);
+        status = IoCreateDevice(DeviceObject->DriverObject, sizeof(PVOID), &deviceName, FILE_DEVICE_UNKNOWN, 0, FALSE, &g_ControlDeviceObject);
         if (NT_SUCCESS(status))
         {
             UNICODE_STRING linkName;
             RtlInitUnicodeString(&linkName, L"\\DosDevices\\LeylineAudio");
             IoCreateSymbolicLink(&linkName, &deviceName);
-            DbgPrint("Leyline: CDO Ready\n");
-        }
-        else if (status == STATUS_OBJECT_NAME_COLLISION)
-        {
-            DbgPrint("Leyline: CDO already exists, skipping creation\n");
-            status = STATUS_SUCCESS;
-        }
-    }
-    else
-        status = STATUS_SUCCESS;
 
-    if (NT_SUCCESS(status))
-    {
-        DbgPrint("Leyline: ==============================================\n");
-        DbgPrint("Leyline: StartDevice COMPLETED SUCCESSFULLY v0.1.0\n");
-        DbgPrint("Leyline:   - WaveRender / WaveCapture\n");
-        DbgPrint("Leyline:   - TopologyRender / TopologyCapture\n");
-        DbgPrint("Leyline: ==============================================\n");
+            // Hook dispatch routines
+            s_OriginalDispatchCreate  = DeviceObject->DriverObject->MajorFunction[IRP_MJ_CREATE];
+            s_OriginalDispatchClose   = DeviceObject->DriverObject->MajorFunction[IRP_MJ_CLOSE];
+            s_OriginalDispatchControl = DeviceObject->DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
+
+            DeviceObject->DriverObject->MajorFunction[IRP_MJ_CREATE]         = DispatchCreate;
+            DeviceObject->DriverObject->MajorFunction[IRP_MJ_CLOSE]          = DispatchClose;
+            DeviceObject->DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchDeviceControl;
+        }
     }
+
+Cleanup:
+    if (renderPort) renderPort->Release();
+    if (capturePort) capturePort->Release();
+    if (renderTopoPort) renderTopoPort->Release();
+    if (captureTopoPort) captureTopoPort->Release();
 
     return status;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// AddDevice - PORTCLS CALLBACK
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 extern "C" NTSTATUS NTAPI AddDevice(PDRIVER_OBJECT DriverObject, PDEVICE_OBJECT PhysicalDeviceObject)
 {
-    DbgPrint("Leyline: AddDevice (PDO: %p)\n", PhysicalDeviceObject);
-
     ULONG extensionSize = (ULONG)(PORT_CLASS_DEVICE_EXTENSION_SIZE + sizeof(DeviceExtension));
     return PcAddAdapterDevice(DriverObject, PhysicalDeviceObject, StartDevice, 10, extensionSize);
 }

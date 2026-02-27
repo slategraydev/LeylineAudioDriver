@@ -31,19 +31,38 @@
 *.out
 *.app
 
-# Project Specific
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# PROJECT SPECIFIC - LEYLINE
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Build Outputs
 target/
-package/*.sys
-package/*.cat
-package/*.pdb
-package/*.map
+package/
+driver/bin/
+driver/obj/
+driver/objfre_win10_amd64/
+driver/objchk_win10_amd64/
+
+# Generated Files
+driver/*.inf
 *.pfx
+*.cer
+*.cat
+*.sys
 *.pdb
 *.map
-driver/obj*/
-driver/*.obj
-driver/*.pch
-build.log
-buildchk.*/
-buildfre.*/
-*.cer
+
+# MSBuild / Visual Studio
+.vs/
+*.user
+*.suo
+*.log
+*.tlog
+*.lastbuildstate
+
+# .NET / Tester
+test/EndpointTester/bin/
+test/EndpointTester/obj/
+
+# Cleanup
+sysinfo.txt
