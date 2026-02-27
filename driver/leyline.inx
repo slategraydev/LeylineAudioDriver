@@ -1,0 +1,147 @@
+; Copyright (c) 2026 Randall Rosas (Slategray). All rights reserved.
+;
+; leyline.inx - Driver installation template
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = leyline.cat
+DriverVer   = 02/25/2026,0.2.0.0
+PnpLockdown = 1
+
+[SourceDisksNames]
+222 = %DiskName%,,,
+
+[SourceDisksFiles]
+leyline.sys    = 222
+
+[SignatureAttributes]
+leyline.sys = SignatureAttributes.DRM
+
+[SignatureAttributes.DRM]
+DRMLevel = 1300
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...17763
+
+[Standard.NT$ARCH$.10.0...17763]
+%DeviceName% = Leyline_Device, ROOT\MEDIA\LeylineAudio
+
+[DestinationDirs]
+Leyline_Device.CopyList = 13
+
+; ===========================================================================
+; Leyline_Device
+; ===========================================================================
+[Leyline_Device.NT]
+Include=ks.inf,wdmaudio.inf
+Needs=KS.Registration, WDMAUDIO.Registration
+CopyFiles = Leyline_Device.CopyList
+AddReg    = Leyline_Device.AddReg
+
+[Leyline_Device.CopyList]
+leyline.sys
+
+[Leyline_Device.AddReg]
+HKR,,AssociatedFilters,,  "wdmaud,swmidi,redbook"
+HKR,,Driver,,             leyline.sys
+HKR,Drivers,SubClasses,,  "wave"
+HKR,Drivers\wave\wdmaud.drv,Driver,,     wdmaud.drv
+HKR,Drivers\wave\wdmaud.drv,Description,,%DeviceName%
+
+; ===========================================================================
+; Interfaces
+; ===========================================================================
+[Leyline_Device.NT.Interfaces]
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveRender%,     Leyline.I.WaveRender
+AddInterface=%KSCATEGORY_RENDER%,   %KSNAME_WaveRender%,     Leyline.I.WaveRender
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveRender%,     Leyline.I.WaveRender
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyRender%, Leyline.I.TopologyRender
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyRender%, Leyline.I.TopologyRender
+
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_WaveCapture%,     Leyline.I.WaveCapture
+AddInterface=%KSCATEGORY_CAPTURE%,  %KSNAME_WaveCapture%,     Leyline.I.WaveCapture
+AddInterface=%KSCATEGORY_REALTIME%, %KSNAME_WaveCapture%,     Leyline.I.WaveCapture
+AddInterface=%KSCATEGORY_AUDIO%,    %KSNAME_TopologyCapture%, Leyline.I.TopologyCapture
+AddInterface=%KSCATEGORY_TOPOLOGY%, %KSNAME_TopologyCapture%, Leyline.I.TopologyCapture
+
+[Leyline.I.WaveRender.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%DeviceNameRender%
+HKR,,%PKEY_AudioEngine_OEMFormat%,0x00000001, 28,00,00,00, FE,FF,02,00, 80,BB,00,00, 00,EE,02,00, 04,00, 10,00, 16,00, 10,00, 03,00,00,00, 01,00,00,00, 00,00,10,00, 80,00,00,AA,00,38,9B,71
+
+[Leyline.I.TopologyRender.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%DeviceNameRender%
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_SPEAKER%
+HKR,,%PKEY_AudioDevice_EnableEndpointByDefault%,0x00010001,0x00000001
+
+[Leyline.I.WaveCapture.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%DeviceNameCapture%
+HKR,,%PKEY_AudioEngine_OEMFormat%,0x00000001, 28,00,00,00, FE,FF,02,00, 80,BB,00,00, 00,EE,02,00, 04,00, 10,00, 16,00, 10,00, 03,00,00,00, 01,00,00,00, 00,00,10,00, 80,00,00,AA,00,38,9B,71
+
+[Leyline.I.TopologyCapture.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%DeviceNameCapture%
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_MICROPHONE%
+HKR,,%PKEY_AudioDevice_EnableEndpointByDefault%,0x00010001,0x00000002
+
+[Leyline.I.WaveRender]
+AddReg = Leyline.I.WaveRender.AddReg
+
+[Leyline.I.TopologyRender]
+AddReg = Leyline.I.TopologyRender.AddReg
+
+[Leyline.I.WaveCapture]
+AddReg = Leyline.I.WaveCapture.AddReg
+
+[Leyline.I.TopologyCapture]
+AddReg = Leyline.I.TopologyCapture.AddReg
+
+; ===========================================================================
+; Service
+; ===========================================================================
+[Leyline_Device.NT.Services]
+AddService = Leyline, 0x00000002, Leyline_Service_Inst
+
+[Leyline_Service_Inst]
+DisplayName   = %ServiceDesc%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\leyline.sys
+
+[Strings]
+ManufacturerName  = "Randall Rosas (Slategray)"
+DiskName          = "Leyline Audio Installation Disk"
+DeviceName        = "Leyline Audio Virtual Adapter"
+DeviceNameRender  = "Leyline Output"
+DeviceNameCapture = "Leyline Input"
+ServiceDesc       = "Leyline Audio Driver Service"
+
+; GUIDs
+Proxy.CLSID        = "{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
+KSCATEGORY_AUDIO   = "{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_RENDER  = "{65E8773E-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_CAPTURE = "{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_TOPOLOGY= "{DDA54A40-1E4C-11D1-A050-405705C10000}"
+KSCATEGORY_REALTIME= "{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+
+; Names (Must match adapter.cpp exactly)
+KSNAME_WaveRender      = "WaveRender"
+KSNAME_WaveCapture     = "WaveCapture"
+KSNAME_TopologyRender  = "TopologyRender"
+KSNAME_TopologyCapture = "TopologyCapture"
+
+; Property Keys
+PKEY_AudioEndpoint_Association           = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2"
+PKEY_AudioDevice_EnableEndpointByDefault = "{F3E80BEF-1723-4FF2-BCC4-7F83DC5E46D4},4"
+PKEY_AudioEngine_OEMFormat               = "{E4870E26-3CC5-4CD2-BA46-CA0A9A70ED04},3"
+
+; Nodes
+KSNODETYPE_SPEAKER    = "{DFF21CE1-F70F-11D0-B917-00A0C9223196}"
+KSNODETYPE_MICROPHONE = "{DFF21BE1-F70F-11D0-B917-00A0C9223196}"

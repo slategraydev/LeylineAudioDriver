@@ -30,20 +30,3 @@
 *.exe
 *.out
 *.app
-
-# Project Specific
-target/
-package/*.sys
-package/*.cat
-package/*.pdb
-package/*.map
-*.pfx
-*.pdb
-*.map
-driver/obj*/
-driver/*.obj
-driver/*.pch
-build.log
-buildchk.*/
-buildfre.*/
-*.cer
